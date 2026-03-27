@@ -1,0 +1,96 @@
+name: Download and Release ASR Model
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Download model files from HuggingFace
+        run: |
+          python - <<'EOF'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+              repo_id="hudaiapa88/sherpa-stt-onnx",
+              local_dir="model_files",
+              allow_patterns="de/kroko_128l/*",
+          )
+          EOF
+
+      - name: Verify required files
+        run: |
+          echo "Files downloaded:"
+          ls -lh model_files/de/kroko_128l/
+          # Verify that encoder, decoder, joiner and tokens files are present
+          MISSING=0
+          for keyword in encoder decoder joiner tokens; do
+            if ! ls model_files/de/kroko_128l/ | grep -qi "$keyword"; then
+              echo "ERROR: No file matching '$keyword' found."
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo "One or more required files are missing. Aborting."
+            exit 1
+          fi
+          echo "All required files found."
+
+      - name: Create ZIP archive
+        run: |
+          cd model_files/de/kroko_128l
+          zip -r ../../../de_kroko_128l.zip .
+          echo "Archive created:"
+          ls -lh ../../../de_kroko_128l.zip
+
+      - name: Generate release tag
+        id: tag
+        run: echo "tag=v1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "de/kroko_128l ONNX model – ${{ steps.tag.outputs.tag }}"
+          body: |
+            ## German Kroko 128L ASR ONNX Model
+
+            This release contains the compressed ONNX model files for the German Kroko 128L
+            automatic speech recognition (ASR) model, sourced from
+            [hudaiapa88/sherpa-stt-onnx](https://huggingface.co/hudaiapa88/sherpa-stt-onnx/tree/main/de/kroko_128l)
+            on Hugging Face.
+
+            ### Contents of `de_kroko_128l.zip`
+            - **Encoder** – encoder ONNX model
+            - **Decoder** – decoder ONNX model
+            - **Joiner** – joiner ONNX model
+            - **Tokens** – vocabulary / tokens file
+
+            ### Usage
+            Use with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) for offline
+            German speech recognition.
+
+            ### License
+            The model files are released under the
+            [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+          files: de_kroko_128l.zip
+          draft: false
+          prerelease: false
